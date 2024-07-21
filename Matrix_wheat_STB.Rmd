@@ -1,0 +1,1997 @@
+---
+title: "Plant-plant interactions in varietal mixtures directly modulate wheat susceptibility to Septoria tritici blotch"
+author: "Laura MATHIEU"
+date: "2024"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Load packages
+
+```{r packages}
+
+library(ggplot2)     # For data visualization
+library(car)         # For data manipulation
+library(dplyr)       # For data manipulation
+library(tidyr)       # For data manipulation
+library(ARTool)      # For Aligned Rank Transform and ANOVA
+library(emmeans)     # For corrected means
+library(svglite)     # For saving plots as SVG
+
+```
+
+
+
+# Load data for durum wheat - STB
+
+
+
+```{r data - DW, results="hide"}
+
+# Remove all objects from the current workspace
+remove(list=ls())
+
+# Set the working directory to the specified path
+setwd("D:/Mes Donnees/LAURA/Redaction/1. Matrices/Matrices - v2/Data & script")
+
+# Load the dataset from a CSV file
+data_DW <- read.table("Durum_wheat_STB.csv", sep = ";", dec = ".", head = TRUE)
+
+# Convert specific columns to appropriate data types
+data_DW$Focal <- as.factor(data_DW$Focal)         # Convert 'Focal' to a factor
+data_DW$Neighbor <- as.factor(data_DW$Neighbor)   # Convert 'Neighbor' to a factor
+data_DW$Pair <- as.factor(data_DW$Pair)           # Convert 'Pair' to a factor
+data_DW$Condition <- as.factor(data_DW$Condition) # Convert 'Condition' to a factor
+data_DW$N <- as.numeric(data_DW$N)                # Convert 'N' to numeric
+data_DW$PN <- as.numeric(data_DW$PN)              # Convert 'PN' to numeric
+
+# Display the structure of the dataset to verify the changes
+str(data_DW)
+
+```
+
+
+# Necrosis analysis
+
+
+## Mean pairwise comparisons
+
+```{r mean pairwise comparisons - DW - N}
+
+# Fit an aligned rank transform (ART) model
+model <- art(N ~ Pair, data = data_DW)
+
+# Perform ANOVA on the ART model
+anova(model)
+
+# Conduct pairwise comparisons using the ART model
+sign <- art.con(model, "Pair", adjust = "none")
+
+# Increase the maximum number of printed lines to display all results
+options(max.print=5000)
+
+# Convert the pairwise comparisons to a data frame
+sign_table <- data.frame(sign)
+
+# Apply Bonferroni correction: filter results with p-value < 0.0125 (0.1/8)
+sign_table2 <- sign_table[sign_table$p.value < 0.0125,]
+
+# Annotated pairwise comparisons with significant results after Bonferroni correction:
+# anv_anv - anv_ato : p-value = 1.646967e-03, adjusted p-value = 0.01317574, significance = *
+# ato_anv - ato_ato : p-value = 4.130543e-04, adjusted p-value = 0.003304434, significance = **
+# lib_lib - lib_scu : p-value = 4.820292e-03, adjusted p-value = 0.03856234, significance = *
+# obe_obe - obe_sur : p-value = 1.114369e-02, adjusted p-value = 0.08914952, significance = .
+# scu_lib - scu_scu : p-value = 2.751775e-03, adjusted p-value = 0.0220142, significance = *
+# sur_cul - sur_sur : p-value = 2.158203e-04, adjusted p-value = 0.001726562, significance = **
+# sur_lib - sur_sur : p-value = 1.023059e-05, adjusted p-value = 8.184472e-05, significance = ***
+# voi_scu - voi_voi : p-value = 2.582799e-03, adjusted p-value = 0.02066239, significance = *
+
+# 8 mixtures = 9.88% mixtures showing NMS
+
+```
+
+## Create mean heatmap for pairwise comparisons
+
+```{r mean pairwise heatmap - DW - N , include=FALSE}
+
+# Generate estimated marginal means (least squares means)
+emm <- emmeans(artlm(model, "Pair"), ~ Pair, pbktest.limit = 200000)
+leastsquare <- as.data.frame(emm)
+
+# Merge the estimated marginal means with the original dataset
+data_DW_2 <- merge(leastsquare, data_DW, by = "Pair")
+
+# Initialize a data frame to store the results
+Pair <- unique(data_DW_2$Pair)
+Paires <- data.frame()
+compt <- 1
+
+# Calculate the mean 'emmean' for each pair
+for(i in Pair) {
+  sub <- subset(data_DW_2, Pair == i)
+  x <- mean(sub$emmean)
+  Paires[compt,1] <- i
+  Paires[compt,2] <- x
+  f <- unique(sub$Focal)
+  n <- unique(sub$Neighbor)
+  Paires[compt,3] <- f
+  Paires[compt,4] <- n
+  compt <- compt + 1
+}
+
+# Rename the columns of the data frame
+colnames(Paires) <- c('Pair', 'emmean', 'Focal', 'Neighbor')
+
+# Initialize data frames for storing normalized values and pairs
+Focal <- unique(Paires$Focal)
+liste <- data.frame(nrow = 1:9)
+liste$nrow <- as.character(liste$nrow)
+liste_pair <- data.frame(nrow = 1:9)
+liste_pair$nrow <- as.character(liste_pair$nrow)
+
+# Normalize the emmeans by the mean of each focal pair
+for(i in Focal) {
+  pair_sub <- subset(Paires, Focal == i)
+  
+  pair_sub_ii <- subset(pair_sub, Neighbor == i)
+  x <- pair_sub_ii$emmean
+  
+  y <- pair_sub$emmean
+  norm <- pair_sub$emmean / x
+  norm <- as.data.frame(norm)
+  norm[,2] <- row.names(norm)
+  colnames(norm) <- c('norm', 'nrow')
+  liste <- liste %>% full_join(norm, by = "nrow")
+  
+  pair <- pair_sub$Pair
+  pair <- as.data.frame(pair)
+  pair[,2] <- row.names(pair)
+  colnames(pair) <- c('Pair', 'nrow')
+  liste_pair <- liste_pair %>% full_join(pair, by = "nrow")
+}
+
+# Process the normalized values and pairs
+liste <- liste[,2:10]
+colnames(liste) <- 1:9
+list <- as.list(liste)
+list_num <- data.frame(unlist(list))
+list_ssNA <- subset(list_num, unlist.list.!="NA")
+
+liste_pair <- liste_pair[,2:10]
+colnames(liste_pair) <- 1:9
+list_pair <- as.list(liste_pair)
+list_pair <- data.frame(unlist(list_pair))
+list_pair_ssNA <- subset(list_pair, unlist.list_pair.!="NA")
+
+# Merge the processed values with the original pairs
+y_pur <- merge(list_ssNA, list_pair_ssNA, by = 0)
+colnames(y_pur) <- c('nrow','y_pur','Pair')
+Pair <- merge(y_pur, Paires, by = "Pair")
+
+# Reorder the levels of the 'Focal' factor
+Pair$Focal <- factor(Pair$Focal, levels = rev(unique(Paires$Focal)))
+
+# Create a mean heatmap using ggplot2
+heatmap_y_mix_pure_mean_pure <- ggplot(Pair, aes(x = Neighbor, y = Focal)) + 
+  geom_tile(aes(fill = y_pur), colour = "black", size = 1) +
+  scale_fill_gradient2(low = "darkblue", high = "red", mid = "white", midpoint = 1) +
+  theme_minimal() +
+  geom_text(x = 2, y = 8.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 1, y = 7.8, label = "**", col = "black", size = 10) +
+  geom_text(x = 7, y = 5.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 8, y = 5.3, label = ".", col = "black", size = 10) +
+  geom_text(x = 4, y = 2.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 3, y = 1.8, label = "**", col = "black", size = 10) +
+  geom_text(x = 4, y = 1.8, label = "***", col = "black", size = 10) +
+  geom_text(x = 7, y = 0.8, label = "*", col = "black", size = 10) +
+  ylab("Focal") +
+  xlab("Neighbor") +
+  ggtitle("Necrosis surface / leaf surface of the focal plant (N/L)") +
+  labs(fill = "Mean(Mix) / Mean(Pure)") +
+  theme(plot.title = element_text(color = "black", size = 15, face = "italic", hjust = 0.5),
+        legend.title = element_text(face = "bold", size = 10),
+        axis.text.x = element_text(color = "black", size = 12, face = "bold", angle = 90, hjust = 1),
+        axis.title.x = element_text(color = "black", size = 12, face = "bold"),
+        strip.text.x = element_text(color = "black", size = 12, face = "bold"),
+        axis.text.y = element_text(color = "black", size = 12, face = "bold", angle = 0, hjust = 1),
+        axis.title.y = element_text(color = "black", size = 12, face = "bold", angle = 90, hjust = 1))
+
+# Display the heatmap
+heatmap_y_mix_pure_mean_pure
+
+# Save the heatmap as an SVG file
+ggsave(file="Matrice_NonParam_DW_Necrosis.svg", plot=heatmap_y_mix_pure_mean_pure, width=9, height=9)
+
+```
+
+## Variance pairwise comparisons
+
+```{r variance pairwise comparisons - DW - N}
+
+# Initialize variables
+Pair = unique(data_DW$Pair)
+Paires = data.frame()
+compt = 1
+
+# Calculate variances for each pair and store in Paires dataframe
+for (i in Pair) { 
+  sub = subset(data_DW, Pair == i)
+  x = var(sub$N)
+  print(x)
+  Paires[compt, 1] = i
+  Paires[compt, 2] = x
+  f = unique(sub$Focal)
+  n = unique(sub$Neighbor)
+  Paires[compt, 3] = f
+  Paires[compt, 4] = n
+  compt = compt + 1
+}
+
+# Rename columns for clarity
+colnames(Paires) = c('Pair', 'var', 'Focal', 'Neighbor')
+
+# Initialize dataframes for normalized values and pairs
+Focal = unique(Paires$Focal)
+liste = data.frame(nrow = 1:9)
+liste$nrow = as.character(liste$nrow)
+liste_pair = data.frame(nrow = 1:9)
+liste_pair$nrow = as.character(liste_pair$nrow)
+
+# Normalize the variances by the mean of each focal pair
+for (i in Focal) {
+  pair_sub = subset(Paires, Focal == i)
+  
+  pair_sub_ii = subset(pair_sub, Neighbor == i)
+  x = pair_sub_ii$var
+  print(x)
+  
+  y = pair_sub$var
+  print(y)
+  norm = pair_sub$var / x
+  norm = as.data.frame(norm)
+  norm[, 2] = row.names(norm)
+  colnames(norm) = c('norm', 'nrow')
+  print(norm)
+  liste <- liste %>% full_join(norm, by = "nrow")
+  
+  pair = pair_sub$Pair
+  pair = as.data.frame(pair)
+  pair[, 2] = row.names(pair)
+  colnames(pair) = c('Pair', 'nrow')
+  liste_pair <- liste_pair %>% full_join(pair, by = "nrow")
+}
+
+# Process the normalized values and pairs
+liste = liste[, 2:10]
+colnames(liste) = 1:9
+list = as.list(liste)
+list_num = data.frame(unlist(list))
+list_ssNA = subset(list_num, unlist.list.!="NA")
+
+liste_pair = liste_pair[, 2:10]
+colnames(liste_pair) = 1:9
+list_pair = as.list(liste_pair)
+list_pair = data.frame(unlist(list_pair))
+list_pair_ssNA = subset(list_pair, unlist.list_pair.!="NA")
+
+# Merge the processed values with the original pairs
+y_pur = merge(list_ssNA, list_pair_ssNA, by = 0)
+colnames(y_pur) = c('nrow', 'y_pur', 'Pair')
+Pair = merge(y_pur, Paires, by = "Pair")
+
+# Perform pairwise variance tests
+pvals_var_all = data.frame()
+
+Focal = unique(Paires$Focal)
+Neighbor = unique(Paires$Neighbor)
+
+for (i in Focal) {
+  pair_sub = subset(data_DW, Focal == i)
+  
+  for (j in Neighbor) {
+    # Execute the loop only if j is different from i
+    if (j != i) {
+      pair_sub_ii = subset(pair_sub, Neighbor == i | Neighbor == j)
+      
+      levene = leveneTest(N ~ Condition, data = pair_sub_ii)
+      fligner = fligner.test(N ~ Condition, data = pair_sub_ii)
+
+      pvals_var = data.frame()
+      pvals_var[1, 1] = i
+      pvals_var[1, 2] = j
+      pvals_var[1, 3] = levene$`Pr(>F)`[1]
+      pvals_var[1, 4] = fligner$p.value
+
+      colnames(pvals_var) = c('Focal', 'Neighbor', 'pval_Levene', 'pval_Fligner')
+      pvals_var_all = rbind(pvals_var_all, pvals_var)
+    }
+  }
+}
+
+# Adjust p-values for multiple comparisons (Bonferroni correction)
+pvals_var_all$pval_Levene = pvals_var_all$pval_Levene * 8
+pvals_var_all$pval_Fligner = pvals_var_all$pval_Fligner * 8
+pvals_var_all = pvals_var_all[order(pvals_var_all$pval_Fligner), ]
+
+# Annotated pairwise comparisons with significant results after Bonferroni correction:
+# cul - lib:  pval_Levene = 7.397894e-07, pval_Fligner = 0.0001365887, significance = ***
+# cul - scu:  pval_Levene = 5.654614e-05, pval_Fligner = 0.0023446940, significance = **
+# cul - obe:  pval_Levene = 1.166195e-03, pval_Fligner = 0.0118686547, significance = *
+# voi - cul:  pval_Levene = 1.534590e-02, pval_Fligner = 0.0120647100, significance = *
+# scu - pes:  pval_Levene = 2.014455e-02, pval_Fligner = 0.0219987636, significance = *
+# lib - sur:  pval_Levene = 5.872274e-02, pval_Fligner = 0.0665102202, significance = .
+
+# Summary: 6 mixtures (7.41% of mixtures) have a variance different from pure
+
+```
+
+## Variance heatmap of pairwise comparisons
+
+```{r mean pairwise heatmap - DW - N , include=FALSE}
+
+# Reorder the levels of the 'Focal' factor
+Pair$Focal = factor(Pair$Focal, levels = rev(sort(unique(Pair$Focal))))
+
+# Create a heatmap using ggplot2
+heatmap_y_mix_pure_var <- ggplot(Pair, aes(x = Neighbor, y = Focal)) + 
+  geom_tile(aes(fill = y_pur), colour = "black", size = 1) +
+  scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", midpoint = 1, na.value = "#A52A2A") +
+  theme_minimal() +
+  
+  geom_text(x = 4, y = 6.8, label = "***", col = "black", size = 10) +
+  geom_text(x = 7, y = 6.8, label = "**", col = "black", size = 10) +
+  geom_text(x = 5, y = 6.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 3, y = 0.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 6, y = 2.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 8, y = 6.3, label = ".", col = "black", size = 10) +
+  
+  ylab("Focal") +
+  xlab("Neighbor") +
+  ggtitle("Necrosis surface / leaf surface of the focal plant (N/L)") +
+  labs(fill = "Var(Mix) / Var(Pure)") +
+  theme(plot.title = element_text(color = "black", size = 15, face = "italic", hjust = 0.5), # Title formatting
+        legend.title = element_text(face = "bold", size = 10),
+        axis.text.x = element_text(color = "black", size = 12, face = "bold", angle = 90, hjust = 1),
+        axis.title.x = element_text(color = "black", size = 12, face = "bold"),
+        strip.text.x = element_text(color = "black", size = 12, face = "bold"),
+        axis.text.y = element_text(color = "black", size = 12, face = "bold", angle = 0, hjust = 1),
+        axis.title.y = element_text(color = "black", size = 12, face = "bold", angle = 90, hjust = 1)
+  )
+
+# Display the heatmap
+heatmap_y_mix_pure_var
+
+# Save the heatmap as an SVG file
+library(svglite)
+ggsave(file = "Matrice_NonParam_var_DW_Necrosis.svg", plot = heatmap_y_mix_pure_var, width = 9, height = 9)
+
+```
+
+## Variance explained by genetic effects
+
+```{r DGE-IGE - DW - N, include=FALSE}
+
+# Fit the aligned rank transform model to the data
+model = art(N ~ Focal * Neighbor, data = data_DW_2)
+
+# Perform ANOVA on the fitted model
+Result = anova(model)
+
+# Calculate partial eta squared for each term in the ANOVA table
+Result$part.eta.sq = with(Result, `Sum Sq` / (`Sum Sq` + `Sum Sq.res`))
+
+# Display the ANOVA result with partial eta squared
+Result
+
+# Perform ANOVA on the fitted model again for redundancy (to show another way to calculate partial eta squared)
+Result2 = anova(model)
+
+# Calculate partial eta squared using an alternative method
+Result2$part.eta.sq = with(Result2, `F value` * `Df` / (`F value` * `Df` + `Df.res`))
+
+# Display the second ANOVA result with partial eta squared
+Result2
+
+```
+
+## Boxplots mix-pur with variances & means
+
+```{r mean - variances - DW - N}
+
+# Conduct Wilcoxon test & fligner test for N by condition
+wilcox.test(N~Condition, data=data_DW)
+fligner.test(N~Condition, data=data_DW)
+
+# Calculate variances for mix and pure conditions
+Mix <- subset(data_DW, data_DW$Condition == "Mix")
+Mix <- Mix$N
+var(Mix)
+Pure <- subset(data_DW, data_DW$Condition == "Pure")
+Pure <- Pure$N
+var(Pure)
+
+# Plotting
+violin <- ggplot(data_DW_2, aes(x = factor(Condition, level = c('Pure', 'Mix')), y=N)) + geom_violin(trim=FALSE)
+plot <- violin + geom_boxplot(width=0.3, col="#9cb264") + stat_summary(fun=mean, geom="point", shape=23, size=5, color="#7a3776")+
+  geom_text(x=1.5, y=145, label="ns", col="#7a3776", size = 10)+
+  geom_text(x=1, y=145, label="μ(pure) = 66.1", col="#7a3776", size = 10)+
+  geom_text(x=2, y=145, label="μ(mix) = 66.27", col="#7a3776", size = 10)+
+  geom_text(x=1.5, y=135, label="*", col="#9cb264", size = 20)+
+  geom_text(x=1, y=135, label="var(pure) = 1190.96", col="#9cb264", size = 10)+
+  geom_text(x=2, y=135, label="var(mix) = 1142.37", col="#9cb264", size = 10)+
+  ylab("Necrosis surface / leaf surface (N/L)") +
+  ggtitle("Durum wheat")+
+  theme(plot.title =element_text(color = "black", size = 40, face = "italic",hjust =0.5),
+    axis.text.x = element_text(color = "black", size = 40, face = "bold",angle = 0, hjust = ),
+  axis.title.x = element_text(color = "black", size = 40, face = "bold"), 
+  strip.text.x = element_text(color = "black",size=40, face = "bold"),
+  axis.text.y = element_text(color = "black", size = 40, face = "bold",angle = 0, hjust = ),
+  axis.title.y = element_text(color = "black", size = 40, face = "bold",angle = 90, hjust = ))+
+  ylim(-25,150)
+print(plot)
+
+# Save the plot as an SVG file
+ggsave(file="MixPur_brut_mean_var_DW_Necrosis.svg", plot=plot, width=15, height=15)
+
+```
+
+## Variances vs. mean analysis 
+
+```{r var ~ mean - DW - N, include=FALSE}
+
+# Initialize variables and data frame
+pair = unique(data_DW$Pair)
+sf.N.L_pair <- data.frame()
+n = 1
+
+# Loop through each modality to calculate variance and mean of necrosis surface
+for (i in pair) {
+  symptom = subset(data_DW, Pair == i)  # Subset data for the current pair
+  v = var(symptom$N)  # Calculate variance of necrosis surface
+  m = mean(symptom$N)  # Calculate mean of necrosis surface
+  print(v)
+  print(m)
+  new = c(i, v, m)
+  print(new)
+  # Add the results to the data frame
+  sf.N.L_pair[nrow(sf.N.L_pair) + 1, 1:3] <- c(i, v, m)
+  n = n + 1
+}
+
+# Rename columns
+colnames(sf.N.L_pair) <- c('Pair', 'Var', 'Mean')
+sf.N.L_pair[,2] <- as.numeric(sf.N.L_pair[,2])
+sf.N.L_pair[,3] <- as.numeric(sf.N.L_pair[,3])
+# Order the data frame by mean
+sf.N.L_pair <- sf.N.L_pair[order(sf.N.L_pair[,3]),]
+
+# Merge the calculated variance and mean back to the original data
+data_DW_3 <- merge(data_DW, sf.N.L_pair)
+# Order the merged data by the calculated mean
+data_DW_3 <- data_DW_3[order(data_DW_3[,9]),]
+
+# Create a boxplot of necrosis surface by pair, ordered by mean
+plot_var <- ggplot(data_DW_3, aes(x = reorder(Pair, Mean), y = N)) + 
+  geom_boxplot(fill = "red", outlier.colour = "black", outlier.shape = 16,
+               outlier.size = 2, notch = FALSE)
+
+# Display the boxplot
+plot_var
+
+# Create a scatter plot of mean vs. variance of necrosis surface
+plot <- ggplot(sf.N.L_pair, aes(x = Mean, y = Var)) + 
+  geom_point() +
+  geom_smooth(color = "darkred", fill = "red") +
+  xlab("Average necrosis surface of focal plants") +
+  ylab("Necrosis variance of focal plants") +
+  theme(
+    axis.text.x = element_text(color = "black", size = 20, face = "bold", angle = 0, hjust = ),
+    axis.title.x = element_text(color = "black", size = 20, face = "bold"), 
+    strip.text.x = element_text(color = "black", size = 20, face = "bold"),
+    axis.text.y = element_text(color = "black", size = 20, face = "bold", angle = 0, hjust = ),
+    axis.title.y = element_text(color = "black", size = 20, face = "bold", angle = 90, hjust = )
+  )
+
+# Display the scatter plot
+plot
+
+# Save the scatter plot to a file
+ggsave(file = "Corr_mean_var__DW_Necrosis.svg", plot = plot, width = 7, height = 7)
+
+```
+
+
+# Pycnidia analysis
+
+
+## Mean pairwise comparisons
+
+```{r mean pairwise - DW - P}
+
+# Remove NA values from data_DW$PN
+data_DW <- data_DW[!is.na(data_DW$PN),]
+
+# Fit an aligned rank transform (ART) model
+model = art(PN ~ Pair, data = data_DW)
+
+# Perform ANOVA on the ART model
+anova(model)
+
+# Conduct pairwise comparisons using the ART model
+sign <- art.con(model, "Pair", adjust = "none")
+
+# Increase the maximum number of printed lines to display all results
+options(max.print=5000)
+
+# Convert the pairwise comparisons to a data frame
+sign_table <- data.frame(sign)
+
+# Apply Bonferroni correction: filter results with p-value < 0.0125 (0.1/8)
+sign_table2 <- sign_table[sign_table$p.value < 0.0125,]
+
+# Annotated pairwise comparisons with significant results after Bonferroni correction:
+# anv_anv - anv_ato : p-value = 9.128641e-07, adjusted p-value = 7.302913e-06, significance = ***
+# anv_anv - anv_obe : p-value = 6.471299e-06, adjusted p-value = 5.177039e-05, significance = ***
+# ato_ato - ato_scu : p-value = 2.149703e-03, adjusted p-value = 0.01719762, significance = *
+# cul_anv - cul_cul : p-value = 2.024464e-03, adjusted p-value = 0.01619571, significance = *
+# cul_cul - cul_lib : p-value = 5.234397e-04, adjusted p-value = 0.004187518, significance = **
+# cul_cul - cul_pes : p-value = 1.169339e-02, adjusted p-value = 0.09354712, significance = .
+# pes_lib - pes_pes : p-value = 4.843422e-03, adjusted p-value = 0.03874738, significance = *
+# pes_obe - pes_pes : p-value = 5.417145e-03, adjusted p-value = 0.04333716, significance = *
+# pes_pes - pes_voi : p-value = 1.109630e-02, adjusted p-value = 0.0887704, significance = .
+# scu_scu - scu_sur : p-value = 7.659616e-03, adjusted p-value = 0.06127693, significance = .
+# sur_scu - sur_sur : p-value = 6.032668e-03, adjusted p-value = 0.04826134, significance = *
+
+# 11 mixtures = 13.58% of mixtures showing significant differences
+
+```
+
+## Create mean heatmap for pairwise comparisons
+
+```{r mean pairwise heatmap - DW - P, include=FALSE}
+
+# Generate estimated marginal means (least squares means)
+emm <- emmeans(artlm(model, "Pair"), ~ Pair, pbktest.limit = 200000)
+
+# Convert the estimated marginal means to a data frame
+leastsquare <- as.data.frame(emm)
+
+# Merge the estimated marginal means with the original dataset
+data_DW_2 <- merge(leastsquare, data_DW, by = "Pair")
+
+# Initialize a data frame to store the results
+Pair <- unique(data_DW_2$Pair)
+Paires <- data.frame()
+compt <- 1
+
+# Calculate the mean 'emmean' for each pair
+for(i in Pair) {
+  sub <- subset(data_DW_2, Pair == i)
+  x <- mean(sub$emmean)
+  Paires[compt, 1] <- i
+  Paires[compt, 2] <- x
+  f <- unique(sub$Focal)
+  n <- unique(sub$Neighbor)
+  Paires[compt, 3] <- f
+  Paires[compt, 4] <- n
+  compt <- compt + 1
+}
+
+# Rename the columns of the data frame
+colnames(Paires) <- c('Pair', 'emmean', 'Focal', 'Neighbor')
+
+# Initialize data frames for storing normalized values and pairs
+Focal <- unique(Paires$Focal)
+liste <- data.frame(nrow = 1:9)
+liste$nrow <- as.character(liste$nrow)
+liste_pair <- data.frame(nrow = 1:9)
+liste_pair$nrow <- as.character(liste_pair$nrow)
+
+# Normalize the emmeans by the mean of each focal pair
+for(i in Focal) {
+  pair_sub <- subset(Paires, Focal == i)
+  
+  pair_sub_ii <- subset(pair_sub, Neighbor == i)
+  x <- pair_sub_ii$emmean
+  
+  y <- pair_sub$emmean
+  norm <- pair_sub$emmean / x
+  norm <- as.data.frame(norm)
+  norm[, 2] <- row.names(norm)
+  colnames(norm) <- c('norm', 'nrow')
+  liste <- liste %>% full_join(norm, by = "nrow")
+  
+  pair <- pair_sub$Pair
+  pair <- as.data.frame(pair)
+  pair[, 2] <- row.names(pair)
+  colnames(pair) <- c('Pair', 'nrow')
+  liste_pair <- liste_pair %>% full_join(pair, by = "nrow")
+}
+
+# Process the normalized values and pairs
+liste <- liste[, 2:10]
+colnames(liste) <- 1:9
+list <- as.list(liste)
+list_num <- data.frame(unlist(list))
+list_ssNA <- subset(list_num, unlist.list.!="NA")
+
+liste_pair <- liste_pair[, 2:10]
+colnames(liste_pair) <- 1:9
+list_pair <- as.list(liste_pair)
+list_pair <- data.frame(unlist(list_pair))
+list_pair_ssNA <- subset(list_pair, unlist.list_pair.!="NA")
+
+# Merge the processed values with the original pairs
+y_pur <- merge(list_ssNA, list_pair_ssNA, by = 0)
+colnames(y_pur) <- c('nrow', 'y_pur', 'Pair')
+Pair <- merge(y_pur, Paires, by = "Pair")
+
+# Reorder the levels of the 'Focal' factor
+Pair$Focal <- factor(Pair$Focal, levels = rev(unique(Paires$Focal)))
+
+# Create a mean heatmap using ggplot2
+heatmap_y_mix_pure_mean_pure <- ggplot(Pair, aes(x = Neighbor, y = Focal)) + 
+  geom_tile(aes(fill = y_pur), colour = "black", size = 1) +
+  scale_fill_gradient2(low = "darkblue", high = "red", mid = "white", midpoint = 1) +
+  theme_minimal() +
+  geom_text(x = 2, y = 8.8, label = "***", col = "black", size = 10) +
+  geom_text(x = 5, y = 8.8, label = "***", col = "black", size = 10) +
+  geom_text(x = 7, y = 7.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 1, y = 6.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 4, y = 6.8, label = "**", col = "black", size = 10) +
+  geom_text(x = 6, y = 7.3, label = ".", col = "black", size = 10) +
+  geom_text(x = 4, y = 3.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 5, y = 3.8, label = "*", col = "black", size = 10) +
+  geom_text(x = 9, y = 4.3, label = ".", col = "black", size = 10) +
+  geom_text(x = 8, y = 3.3, label = ".", col = "black", size = 10) +
+  geom_text(x = 7, y = 1.8, label = "*", col = "black", size = 10) +
+  ylab("Focal") +
+  xlab("Neighbor") +
+  ggtitle("Pycnidia surface / leaf surface of the focal plant (P/L)") +
+  labs(fill = "Mean(Mix) / Mean(Pure)") +
+  theme(plot.title = element_text(color = "black", size = 15, face = "italic", hjust = 0.5),
+        legend.title = element_text(face = "bold", size = 10),
+        axis.text.x = element_text(color = "black", size = 12, face = "bold", angle = 90, hjust = 1),
+        axis.title.x = element_text(color = "black", size = 12, face = "bold"),
+        strip.text.x = element_text(color = "black", size = 12, face = "bold"),
+        axis.text.y = element_text(color = "black", size = 12, face = "bold", angle = 0, hjust = 1),
+        axis.title.y = element_text(color = "black", size = 12, face = "bold", angle = 90, hjust = 1))
+
+# Display the heatmap
+heatmap_y_mix_pure_mean_pure
+
+# Save the heatmap as SVG file
+ggsave(file="Matrice_NonParam_DW_Pycnides.svg", plot=heatmap_y_mix_pure_mean_pure, width=9, height=9)
+
+```
+
+## Variance paiwise comparisons 
+
+```{r variance paiwise comparisons - DW - P}
+
+# Initialize variables
+Pair <- unique(data_DW$Pair)
+Paires <- data.frame()
+compt <- 1
+
+# Calculate variances for each pair and store in Paires dataframe
+for (i in Pair) { 
+  sub <- subset(data_DW, Pair == i)
+  x <- var(sub$PN)
+  print(x)
+  Paires[compt, 1] <- i
+  Paires[compt, 2] <- x
+  f <- unique(sub$Focal)
+  n <- unique(sub$Neighbor)
+  Paires[compt, 3] <- f
+  Paires[compt, 4] <- n
+  compt <- compt + 1
+}
+
+# Rename columns for clarity
+colnames(Paires) <- c('Pair', 'var', 'Focal', 'Neighbor')
+
+# Initialize dataframes for normalized values and pairs
+Focal <- unique(Paires$Focal)
+liste <- data.frame(nrow = 1:9)
+liste$nrow <- as.character(liste$nrow)
+liste_pair <- data.frame(nrow = 1:9)
+liste_pair$nrow <- as.character(liste_pair$nrow)
+
+# Normalize the variances by the mean of each focal pair
+for (i in Focal) {
+  pair_sub <- subset(Paires, Focal == i)
+  
+  pair_sub_ii <- subset(pair_sub, Neighbor == i)
+  x <- pair_sub_ii$var
+  print(x)
+  
+  y <- pair_sub$var
+  print(y)
+  norm <- pair_sub$var / x
+  norm <- as.data.frame(norm)
+  norm[, 2] <- row.names(norm)
+  colnames(norm) <- c('norm', 'nrow')
+  print(norm)
+  liste <- liste %>% full_join(norm, by = "nrow")
+  
+  pair <- pair_sub$Pair
+  pair <- as.data.frame(pair)
+  pair[, 2] <- row.names(pair)
+  colnames(pair) <- c('Pair', 'nrow')
+  liste_pair <- liste_pair %>% full_join(pair, by = "nrow")
+}
+
+# Process the normalized values and pairs
+liste <- liste[, 2:10]
+colnames(liste) <- 1:9
+list <- as.list(liste)
+list_num <- data.frame(unlist(list))
+list_ssNA <- subset(list_num, unlist.list.!="NA")
+
+liste_pair <- liste_pair[, 2:10]
+colnames(liste_pair) <- 1:9
+list_pair <- as.list(liste_pair)
+list_pair <- data.frame(unlist(list_pair))
+list_pair_ssNA <- subset(list_pair, unlist.list_pair.!="NA")
+
+# Merge the processed values with the original pairs
+y_pur <- merge(list_ssNA, list_pair_ssNA, by = 0)
+colnames(y_pur) <- c('nrow', 'y_pur', 'Pair')
+Pair <- merge(y_pur, Paires, by = "Pair")
+
+# Perform pairwise variance tests
+pvals_var_all <- data.frame()
+
+Focal <- unique(Paires$Focal)
+Neighbor <- unique(Paires$Neighbor)
+
+for (i in Focal) {
+  pair_sub <- subset(data_DW, Focal == i)
+  
+  for (j in Neighbor) {
+    # Execute the loop only if j is different from i
+    if (j != i) {
+      pair_sub_ii <- subset(pair_sub, Neighbor == i | Neighbor == j)
+      
+      levene <- leveneTest(PN ~ Condition, data = pair_sub_ii)
+      fligner <- fligner.test(PN ~ Condition, data = pair_sub_ii)
+
+      pvals_var <- data.frame()
+      pvals_var[1, 1] <- i
+      pvals_var[1, 2] <- j
+      pvals_var[1, 3] <- levene$`Pr(>F)`[1]
+      pvals_var[1, 4] <- fligner$p.value
+
+      colnames(pvals_var) <- c('Focal', 'Neighbor', 'pval_Levene', 'pval_Fligner')
+      pvals_var_all <- rbind(pvals_var_all, pvals_var)
+    }
+  }
+}
+
+# Adjust p-values for multiple comparisons (Bonferroni correction)
+pvals_var_all$pval_Levene <- pvals_var_all$pval_Levene * 8
+pvals_var_all$pval_Fligner <- pvals_var_all$pval_Fligner * 8
+pvals_var_all <- pvals_var_all[order(pvals_var_all$pval_Fligner), ]
+
+# Annotated pairwise comparisons with significant results after Bonferroni correction:
+#   ato   sur   0.03723385    0.0008649421    ***
+#   sur   scu   0.02069371    0.0021172577    **
+#   scu   sur   0.15001322    0.0047978954    **
+#   ato   scu   0.15158168    0.0085245977    **
+#   ato   voi   0.63510489    0.0103441271    *
+#   ato   anv   0.96088780    0.0177670145    *
+#   cul   pes   1.73836918    0.0227830824    *
+#   sur   cul   0.35855381    0.0267056063    *
+#   ato   obe   1.37829767    0.0322808505    *
+#   scu   anv   0.76086150    0.0826256500    .
+#   ato   cul   4.04637651    0.0976248634    .
+
+# Summary: 11 mixtures (13.58% of mixtures) have a variance different from pure
+
+```
+
+## Variance heatmap of pairwise comparisons
+
+```{r variance pairwise heatmap - DW - P, include=FALSE}
+
+# Replace values > 4 with NA
+Pair$y_pur <- ifelse(Pair$y_pur > 4, NA, Pair$y_pur)
+
+# Reorder the levels of the 'Focal' factor
+Pair$Focal <- factor(Pair$Focal, levels = rev(sort(unique(Pair$Focal))))
+
+# Create a heatmap using ggplot2
+heatmap_y_mix_pure_var <- ggplot(Pair,aes(x=Neighbor,y= Focal)) + 
+  geom_tile(aes(fill = y_pur), colour = "black", size = 1)+
+  scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", midpoint = 1, na.value = "#A52A2A") +
+  theme_minimal()+
+
+  geom_text(x=8, y=7.8, label="***", col="black", size = 10)+
+  geom_text(x=7, y=1.8, label="**", col="black", size = 10)+
+  geom_text(x=8, y=2.8, label="**", col="black", size = 10)+
+  geom_text(x=7, y=7.8, label="**", col="black", size = 10)+
+  geom_text(x=9, y=7.8, label="*", col="black", size = 10)+
+  geom_text(x=1, y=7.8, label="*", col="black", size = 10)+
+  geom_text(x=6, y=6.8, label="*", col="black", size = 10)+
+  geom_text(x=3, y=1.8, label="*", col="black", size = 10)+
+  geom_text(x=5, y=7.8, label="*", col="black", size = 10)+
+  geom_text(x=1, y=3.3, label=".", col="black", size = 10)+
+  geom_text(x=3, y=8.3, label=".", col="black", size = 10)+
+  
+  ylab("Focal") +
+  xlab("Neighbor")+
+  ggtitle("Pycnidia surface / leaf surface of the focal plant (P/L)")+
+  labs(fill="Var(Mix) / Var(Pure)")+
+  theme(plot.title =element_text(color = "black", size = 15, face = "italic",hjust =0.5),#mise en forme
+        legend.title = element_text(face = "bold", size = 10),
+        axis.text.x = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = ),
+        axis.title.x = element_text(color = "black", size = 12, face = "bold"),
+        strip.text.x = element_text(color = "black",size=12, face = "bold"),
+        axis.text.y = element_text(color = "black", size = 12, face = "bold",angle = 0, hjust = ),
+        axis.title.y = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = )
+  )
+
+# Display the heatmap
+heatmap_y_mix_pure_var
+
+# Save the heatmap as an SVG file
+ggsave(file = "Matrice_NonParam_var_DW_Pycnidia.svg", plot = heatmap_y_mix_pure_var, width = 9, height = 9)
+
+```
+
+## Variance explained by genetic effects
+
+```{r DGE-IGE - DW - P, include=FALSE}
+
+# Fit the aligned rank transform model to the data
+model = art(PN ~ Focal * Neighbor, data = data_DW_2)
+
+# Perform ANOVA on the fitted model
+Result = anova(model)
+
+# Calculate partial eta squared for each term in the ANOVA table
+Result$part.eta.sq = with(Result, `Sum Sq` / (`Sum Sq` + `Sum Sq.res`))
+
+# Display the ANOVA result with partial eta squared
+Result
+
+# Perform ANOVA on the fitted model again for redundancy (to show another way to calculate partial eta squared)
+Result2 = anova(model)
+
+# Calculate partial eta squared using an alternative method
+Result2$part.eta.sq = with(Result2, `F value` * `Df` / (`F value` * `Df` + `Df.res`))
+
+# Display the second ANOVA result with partial eta squared
+Result2
+
+```
+
+## Boxplots mix-pur with variances & means
+
+```{r mean - variances - DW - P}
+
+# Conduct Wilcoxon test & fligner test for N by condition
+wilcox.test(PN~Condition, data=data_DW)
+fligner.test(PN~Condition, data=data_DW)
+
+# Calculate variances for mix and pure conditions
+Mix <- subset(data_DW, data_DW$Condition == "Mix")
+Mix <- Mix$PN
+var(Mix)
+Pure <- subset(data_DW, data_DW$Condition == "Pure")
+Pure <- Pure$PN
+var(Pure)
+
+# Plotting
+violin <- ggplot(data_DW_2, aes(x=factor(Condition, level=c("Pure","Mix")), y=PN)) + geom_violin(trim=FALSE)
+plot <- violin + geom_boxplot(width=0.3, col="#9cb264") + stat_summary(fun=mean, geom="point", shape=23, size=5, color="#7a3776")+
+  geom_text(x=1.5, y=58, label="**", col="#7a3776", size = 20)+
+  geom_text(x=1, y=58, label="μ(pure) = 8.91", col="#7a3776", size = 10)+
+  geom_text(x=2, y=58, label="μ(mix) = 12.38", col="#7a3776", size = 10)+
+  geom_text(x=1.5, y=53, label="***", col="#9cb264", size = 20)+
+  geom_text(x=1, y=53, label="var(pure) = 310.38", col="#9cb264", size = 10)+
+  geom_text(x=2, y=53, label="var(mix) = 429.27", col="#9cb264", size = 10)+
+  ylab("Pycnidia surface / leaf surface (P/L)") +
+  ggtitle("Durum wheat")+
+  theme(plot.title =element_text(color = "black", size = 40, face = "italic",hjust =0.5),
+      axis.text.x = element_text(color = "black", size = 40, face = "bold",angle = 0, hjust = ),
+  axis.title.x = element_text(color = "black", size = 40, face = "bold"), 
+  strip.text.x = element_text(color = "black",size=40, face = "bold"),
+  axis.text.y = element_text(color = "black", size = 40, face = "bold",angle = 0, hjust = ),
+  axis.title.y = element_text(color = "black", size = 40, face = "bold",angle = 90, hjust = ))+
+  ylim(-25,60)
+print(plot)
+
+# Save the plot as an SVG file
+ggsave(file="MixPur_brut_mean_var_DW_Pycnidia.svg", plot=plot, width=15, height=15)
+
+```
+
+## Variances vs. mean analysis 
+
+```{r var ~ mean - DW - P, include=FALSE}
+
+# Initialize variables and data frame
+pair = unique(data_DW$Pair)
+sf.N.L_pair <- data.frame()
+n = 1
+
+# Loop through each modality to calculate variance and mean of necrosis surface
+for (i in pair) {
+  symptom = subset(data_DW, Pair == i)  # Subset data for the current pair
+  v = var(symptom$PN)  # Calculate variance of necrosis surface
+  m = mean(symptom$PN)  # Calculate mean of necrosis surface
+  print(v)
+  print(m)
+  new = c(i, v, m)
+  print(new)
+  # Add the results to the data frame
+  sf.N.L_pair[nrow(sf.N.L_pair) + 1, 1:3] <- c(i, v, m)
+  n = n + 1
+}
+
+# Rename columns
+colnames(sf.N.L_pair) <- c('Pair', 'Var', 'Mean')
+sf.N.L_pair[,2] <- as.numeric(sf.N.L_pair[,2])
+sf.N.L_pair[,3] <- as.numeric(sf.N.L_pair[,3])
+# Order the data frame by mean
+sf.N.L_pair <- sf.N.L_pair[order(sf.N.L_pair[,3]),]
+
+# Merge the calculated variance and mean back to the original data
+data_DW_3 <- merge(data_DW, sf.N.L_pair)
+# Order the merged data by the calculated mean
+data_DW_3 <- data_DW_3[order(data_DW_3[,9]),]
+
+# Create a boxplot of pycnidia by pair, ordered by mean
+plot_var <- ggplot(data_DW_3, aes(x = reorder(Pair, Mean), y = PN)) + 
+  geom_boxplot(fill = "red", outlier.colour = "black", outlier.shape = 16,
+               outlier.size = 2, notch = FALSE)
+
+# Display the boxplot
+plot_var
+
+# Create a scatter plot of mean vs. variance of pycnidia
+plot <- ggplot(sf.N.L_pair, aes(x=Mean, y=Var)) + 
+  geom_point()+
+  geom_text(x=30, y=2500, label="cor = 0.74 - pval < 2.2e-16 \n cov = 4804", col="black", size = 5) +
+  geom_smooth(color="darkred", fill="red")+
+  xlab("Average pycnidia surface of focal plants")+
+  ylab("Pycnidia variance of focal plants")+
+  theme(axis.text.x = element_text(color = "black", size = 20, face = "bold",angle = 0, hjust = ),
+  axis.title.x = element_text(color = "black", size = 20, face = "bold"), 
+  strip.text.x = element_text(color = "black",size=20, face = "bold"),
+  axis.text.y = element_text(color = "black", size = 20, face = "bold",angle = 0, hjust = ),
+  axis.title.y = element_text(color = "black", size = 20, face = "bold",angle = 90, hjust = ))
+
+# Display the scatter plot
+plot
+
+# Save the scatter plot to a file
+ggsave(file = "Corr_mean_var_DW_Pycnidia.svg", plot = plot, width = 7, height = 7)
+
+```
+
+
+
+# Load data for durum wheat - STB
+
+
+
+```{r data - BW, results="hide"}
+
+# Remove all objects from the current workspace
+remove(list=ls())
+
+# Set the working directory to the specified path
+setwd("D:/Mes Donnees/LAURA/Redaction/1. Matrices/Matrices - v2/Data & script")
+
+# Load the dataset from a CSV file
+data_BW <- read.table("Bread_wheat_STB.csv", sep = ";", dec = ",", head = TRUE)
+
+# Convert specific columns to appropriate data types
+data_BW$Focal <- as.factor(data_BW$Focal)         # Convert 'Focal' to a factor
+data_BW$Neighbor <- as.factor(data_BW$Neighbor)   # Convert 'Neighbor' to a factor
+data_BW$Pair <- as.factor(data_BW$Pair)           # Convert 'Pair' to a factor
+data_BW$Condition <- as.factor(data_BW$Condition) # Convert 'Condition' to a factor
+data_BW$Tray <- as.factor(data_BW$Tray)           # Convert 'Tray' to a factor
+data_BW$N <- as.numeric(data_BW$N)                # Convert 'N' to numeric
+data_BW$PN <- as.numeric(data_BW$PN)              # Convert 'PN' to numeric
+
+# Display the structure of the dataset to verify the changes
+str(data_BW)
+
+```
+
+
+# Necrosis analysis
+
+
+# Mean pairwise comparisons
+
+```{r mean pairwise comparisons - BW - N}
+
+# Fit an aligned rank transform (ART) model
+model = art(N ~ (1|Tray) + Pair, data = data_BW)
+
+# Perform ANOVA on the ART model
+anova(model)
+
+# Conduct pairwise comparisons using the ART model
+sign <- art.con(model, "Pair", adjust = "none")
+
+# Increase the maximum number of printed lines to display all results
+options(max.print=5000)
+
+# Convert the pairwise comparisons to a data frame
+sign_table <- data.frame(sign)
+
+# Apply Bonferroni correction: filter results with p-value < 0.00909 (0.1/11)
+sign_table2<-sign_table[sign_table$p.value<0.009090909,] 
+
+# Annotated pairwise comparisons with significant results after Bonferroni correction:
+# Acc_Acc - Acc_Rub: 8.005278e-03
+# Ber_Acc - Ber_Ber: 1.037232e-03
+# Ber_Ber - Ber_Cen: 7.463585e-03
+# Ber_Ber - Ber_SYM: 2.296271e-03
+# Cen_Cen - Cen_SYM: 1.397024e-03
+# Des_Des - Des_Gen: 1.848354e-03
+# Fru_Cen - Fru_Fru: 7.830837e-04
+# Gha_Gha - Gha_Rec: 1.300476e-03
+# Rec_Cen - Rec_Rec: 3.347074e-04
+# SYM_Fru - SYM_SYM: 1.392333e-03
+# Tit_Ber - Tit_Tit: 3.136388e-03
+# Tit_Cen - Tit_Tit: 1.398864e-03
+
+# 12 mixtures = 9.09% mixtures showing NMS
+
+```
+
+## Create mean heatmap for pairwise comparisons
+
+```{r mean pairwise heatmap - BW - N, include=FALSE}
+
+# Generate estimated marginal means (least squares means)
+emm <- emmeans(artlm(model, "Pair"), ~ Pair, pbktest.limit = 200000)
+leastsquare <- as.data.frame(emm)
+
+# Merge the estimated marginal means with the original dataset
+data_BW_2 <- merge(leastsquare, data_BW, by = "Pair")
+
+# Initialize a data frame to store the results
+Pair=unique(data_BW_2$Pair)
+Paires<-data.frame()
+compt=1
+
+# Calculate the mean 'emmean' for each pair
+for(i in Pair){ 
+  sub<-subset(data_BW_2,Pair==i)
+  x<-mean(sub$emmean)
+  print(x)
+  Paires[compt,1]<-i
+  Paires[compt,2]<-x
+  f<-unique(sub$Focal)
+  n<-unique(sub$Neighbor)
+  Paires[compt,3]<-f
+  Paires[compt,4]<-n
+  compt<-compt+1
+}
+
+# Rename the columns of the data frame
+colnames(Paires)<-c('Pair','emmean', 'Focal', 'Neighbor')
+
+# Initialize data frames for storing normalized values and pairs
+Focal=unique(Paires$Focal)
+liste<-data.frame(nrow=1:12)
+liste$nrow<-as.character(liste$nrow)
+liste_pair<-data.frame(nrow=1:12)
+liste_pair$nrow<-as.character(liste_pair$nrow)
+
+# Normalize the emmeans by the mean of each focal pair
+for(i in Focal){
+  pair_sub<-subset(Paires,Focal==i)
+  
+  pair_sub_ii<-subset(pair_sub,Neighbor==i)
+  x<-pair_sub_ii$emmean
+  print(x)
+  
+  y<-pair_sub$emmean
+  print(y)
+  norm<-pair_sub$emmean/x
+  norm<-as.data.frame(norm)
+  norm[,2]<-row.names(norm)
+  colnames(norm)<-c('norm', 'nrow')
+  print(norm)
+  liste <- liste %>% full_join(norm, by="nrow")
+  
+  pair<-pair_sub$Pair
+  pair<-as.data.frame(pair)
+  pair[,2]<-row.names(pair)
+  colnames(pair)<-c('Pair', 'nrow')
+  liste_pair <- liste_pair %>% full_join(pair, by="nrow")
+  
+}
+
+# Process the normalized values and pairs
+liste<-liste[,2:13]
+colnames(liste)<-1:12
+list<-as.list(liste)
+list_num<-data.frame(unlist(list))
+list_ssNA<-subset(list_num, unlist.list.!="NA")
+
+liste_pair<-liste_pair[,2:13]
+colnames(liste_pair)<-1:12
+list_pair<-as.list(liste_pair)
+list_pair<-data.frame(unlist(list_pair))
+list_pair_ssNA<-subset(list_pair, unlist.list_pair.!="NA")
+
+# Merge the processed values with the original pairs
+y_pur<-merge(list_ssNA, list_pair_ssNA, by=0)
+colnames(y_pur)<-c('nrow','y_pur','Pair')
+Pair<-merge(y_pur, Paires, by = "Pair")
+
+
+# Reorder the levels of the 'Focal' factor
+Pair$Focal <- factor(Pair$Focal,levels=rev(unique(Paires$Focal)))
+
+# Create a mean heatmap using ggplot2
+heatmap_y_mix_pure_mean_pure<-ggplot(Pair,aes(x=Neighbor,y=Focal)) + 
+  geom_tile(aes(fill = y_pur), colour = "black", size = 1)+
+  scale_fill_gradient2(low = "darkblue", high = "red", mid = "white", midpoint = 1)+
+  theme_minimal()+
+  geom_text(x=10, y=12.3, label=".", col="black", size = 10)+
+  geom_text(x=1, y=9.8, label="*", col="black", size = 10)+
+  geom_text(x=4, y=10.3, label=".", col="black", size = 10)+
+  geom_text(x=11, y=9.8, label="*", col="black", size = 10)+
+  geom_text(x=11, y=8.8, label="*", col="black", size = 10)+
+  geom_text(x=7, y=7.8, label="*", col="black", size = 10)+
+  geom_text(x=4, y=6.8, label="**", col="black", size = 10)+
+  geom_text(x=9, y=4.8, label="*", col="black", size = 10)+
+  geom_text(x=4, y=3.8, label="**", col="black", size = 10)+
+  geom_text(x=6, y=1.8, label="*", col="black", size = 10)+
+  geom_text(x=3, y=0.8, label="*", col="black", size = 10)+
+  geom_text(x=4, y=0.8, label="*", col="black", size = 10)+
+  ylab("Focal") +
+  xlab("Neighbor")+
+  ggtitle("Necrosis surface / leaf surface of the focal plant (N/L)")+
+  labs(fill="Mean(Mix) / Mean(Pure)")+
+  theme(plot.title =element_text(color = "black", size = 15, face = "italic",hjust =0.5),#mise en forme
+        legend.title = element_text(face = "bold", size = 10),
+        axis.text.x = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = ),
+        axis.title.x = element_text(color = "black", size = 12, face = "bold"),
+        strip.text.x = element_text(color = "black",size=12, face = "bold"),
+        axis.text.y = element_text(color = "black", size = 12, face = "bold",angle = 0, hjust = ),
+        axis.title.y = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = )
+  )
+
+# Display the heatmap
+heatmap_y_mix_pure_mean_pure
+
+# Save the heatmap as an SVG file
+ggsave(file="Matrice_NonParam_BW_Necrosis.svg", plot=heatmap_y_mix_pure_mean_pure, width=9, height=9)
+
+```
+
+## Variance pairwise comparisons
+
+```{r variance pairwise comparisons - BW - N}
+
+# Initialize variables
+Pair = unique(data_BW$Pair)
+Paires = data.frame()
+compt = 1
+
+# Calculate variances for each pair and store in Paires dataframe
+for(i in Pair){ 
+  sub<-subset(data_BW,Pair==i)
+  x<-var(sub$N)
+  print(x)
+  Paires[compt,1]<-i
+  Paires[compt,2]<-x
+  f<-unique(sub$Focal)
+  n<-unique(sub$Neighbor)
+  Paires[compt,3]<-f
+  Paires[compt,4]<-n
+  compt<-compt+1
+   }
+
+# Rename columns for clarity
+colnames(Paires)<-c('Pair','var', 'Focal', 'Neighbor')
+
+# Initialize dataframes for normalized values and pairs
+Focal=unique(Paires$Focal)
+liste<-data.frame(nrow=1:12)
+liste$nrow<-as.character(liste$nrow)
+liste_pair<-data.frame(nrow=1:12)
+liste_pair$nrow<-as.character(liste_pair$nrow)
+
+# Normalize the variances by the mean of each focal pair
+for(i in Focal){
+  pair_sub<-subset(Paires, Focal==i)
+  
+  pair_sub_ii<-subset(pair_sub, Neighbor==i)
+  x<-pair_sub_ii$var
+  print(x)
+  
+  y<-pair_sub$var
+  print(y)
+  norm<-pair_sub$var/x
+  norm<-as.data.frame(norm)
+  norm[,2]<-row.names(norm)
+  colnames(norm)<-c('norm', 'nrow')
+  print(norm)
+  liste <- liste %>% full_join(norm, by="nrow")
+  
+  pair<-pair_sub$Pair
+  pair<-as.data.frame(pair)
+  pair[,2]<-row.names(pair)
+  colnames(pair)<-c('Pair', 'nrow')
+  liste_pair <- liste_pair %>% full_join(pair, by="nrow")
+  
+}
+
+# Process the normalized values and pairs
+liste<-liste[,2:13]
+colnames(liste)<-1:12
+list<-as.list(liste)
+list_num<-data.frame(unlist(list))
+list_ssNA<-subset(list_num, unlist.list.!="NA")
+
+liste_pair<-liste_pair[,2:13]
+colnames(liste_pair)<-1:12
+list_pair<-as.list(liste_pair)
+list_pair<-data.frame(unlist(list_pair))
+list_pair_ssNA<-subset(list_pair, unlist.list_pair.!="NA")
+
+# Merge the processed values with the original pairs
+y_pur<-merge(list_ssNA, list_pair_ssNA, by=0)
+colnames(y_pur)<-c('nrow','y_pur','Pair')
+Pair<-merge(y_pur, Paires, by = "Pair")
+
+# Perform pairwise variance tests
+pvals_var_all <- data.frame()
+
+Focal=unique(Paires$Focal)
+Neighbor=unique(Paires$Neighbor)
+
+for(i in Focal){
+  pair_sub<-subset(data_BW,Focal==i)
+  
+  for(j in Neighbor){
+    # Ajouter la condition pour exécuter la boucle uniquement si j est différent de i
+    if (j != i) {
+      pair_sub_ii <- subset(pair_sub, Neighbor == i | Neighbor == j)
+      
+      levene <- leveneTest(N ~ Condition, data = pair_sub_ii)
+      fligner <- fligner.test(N ~ Condition, data = pair_sub_ii)
+
+      pvals_var <- data.frame()
+      pvals_var[1, 1] <- i
+      pvals_var[1, 2] <- j
+      pvals_var[1, 3] <- levene$`Pr(>F)`[1]
+      pvals_var[1, 4] <- fligner$p.value
+
+      colnames(pvals_var) <- c('Focal', 'Neighbor', 'pval_Levene', 'pval_Fligner')
+      pvals_var_all <- rbind(pvals_var_all, pvals_var)
+    }
+  }
+}
+
+# Adjust p-values for multiple comparisons (Bonferroni correction)
+pvals_var_all$pval_Levene <- pvals_var_all$pval_Levene*11
+pvals_var_all$pval_Fligner <- pvals_var_all$pval_Fligner*11
+pvals_var_all <- pvals_var_all[order(pvals_var_all$pval_Fligner), ]
+
+# Annotated pairwise comparisons with significant results after Bonferroni correction:
+# Focal     Neighbor  pval_Levene   pval_Fligner  
+# SYMattis  Bergamo   7.566479e-09  8.028049e-05  ***
+# Bergamo   Accroc    1.183542e-01  1.299598e-04  ***
+# Bergamo   SYMattis  1.402896e-01  2.002074e-04  ***
+# Descartes Ghayta    1.233956e-04  5.404730e-04  ***
+# Geny (AB) Accroc    2.846591e-02  5.495394e-04  ***
+# Accroc    Bergamo   3.266480e-03  7.862811e-04  ***
+# SYMattis  Ghayta    3.349031e-06  1.257707e-03  **
+# Accroc    Geny (AB) 1.052518e-02  4.858227e-03  **
+# SYMattis  Geny (AB) 2.217538e-04  9.040999e-03  **
+# Bergamo   Geny (AB) 8.426341e-01  1.099151e-02  *
+# Rubisko   Geny (AB) 2.276796e-01  1.134989e-02  *
+# Centurion Titlis    1.502621e-01  1.233881e-02  *
+# Titlis    Descartes 2.553012e-02  1.534845e-02  *
+# Ghayta    Rubisko   8.252292e-01  1.585896e-02  *
+# SYMattis  Descartes 1.028085e-03  1.613225e-02  *
+# Geny (AB) Centurion 6.473045e-01  4.145409e-02  *
+# Centurion SYMattis  1.118138e+00  4.190798e-02  *
+# Fructidor Centurion 1.949513e-01  4.215513e-02  *
+# Titlis    SYMattis  3.383048e-02  4.497647e-02  *
+# Recital   Rubisko   1.875513e-01  4.650920e-02  *
+# SYMattis  Centurion 8.198798e-04  5.627800e-02  .
+# Centurion Geny (AB) 8.960032e-01  6.211341e-02  .
+# Rubisko   Recital   2.906700e-01  8.642936e-02  .
+# Fructidor Descartes 1.952299e-01  8.846788e-02  .
+# SYMattis  Apache    1.640033e-02  9.077468e-02  .
+
+# 25 mixtures (18.94% of mixtures) have a variance different from pure
+
+```
+
+## Variance heatmap of pairwise comparisons
+
+```{r mean pairwise heatmap - BW - N , include=FALSE}
+
+# Replace the values > 4 by NA
+Pair$y_pur <- ifelse(Pair$y_pur > 4, NA, Pair$y_pur)
+
+# Reorder the levels of the 'Focal' factor
+Pair$Focal <- factor(Pair$Focal, levels = rev(sort(unique(Pair$Focal))))
+
+# Create a heatmap using ggplot2
+heatmap_y_mix_pure_var <- ggplot(Pair,aes(x=Neighbor,y= Focal)) + 
+  geom_tile(aes(fill = y_pur), colour = "black", size = 1)+
+  scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", midpoint = 1, na.value = "#A52A2A") +
+  theme_minimal()+
+  geom_text(x=2, y=2.3, label=".", col="black", size = 10)+
+  geom_text(x=5, y=7.3, label=".", col="black", size = 10)+
+  geom_text(x=9, y=3.3, label=".", col="black", size = 10)+
+  geom_text(x=7, y=9.3, label=".", col="black", size = 10)+
+  geom_text(x=4, y=2.3, label=".", col="black", size = 10)+
+  geom_text(x=7, y=9.8, label="*", col="black", size = 10)+
+  geom_text(x=7, y=2.8, label="*", col="black", size = 10)+
+  geom_text(x=12, y=8.8, label="*", col="black", size = 10)+
+  geom_text(x=5, y=0.8, label="*", col="black", size = 10)+
+  geom_text(x=10, y=4.8, label="*", col="black", size = 10)+
+  geom_text(x=5, y=1.8, label="*", col="black", size = 10)+
+  geom_text(x=4, y=5.8, label="*", col="black", size = 10)+
+  geom_text(x=11, y=8.8, label="*", col="black", size = 10)+
+  geom_text(x=4, y=6.8, label="*", col="black", size = 10)+
+  geom_text(x=11, y=0.8, label="*", col="black", size = 10)+
+  geom_text(x=10, y=3.8, label="*", col="black", size = 10)+
+  geom_text(x=8, y=1.8, label="**", col="black", size = 10)+
+  geom_text(x=7, y=11.8, label="**", col="black", size = 10)+
+  geom_text(x=7, y=1.8, label="**", col="black", size = 10)+
+  geom_text(x=3, y=1.8, label="***", col="black", size = 10)+
+  geom_text(x=1, y=9.8, label="***", col="black", size = 10)+
+  geom_text(x=11, y=9.8, label="***", col="black", size = 10)+
+  geom_text(x=8, y=7.8, label="***", col="black", size = 10)+
+  geom_text(x=1, y=5.8, label="***", col="black", size = 10)+
+  geom_text(x=3, y=11.8, label="***", col="black", size = 10)+
+  
+  ylab("Focal") +
+  xlab("Neighbor")+
+  ggtitle("Necrosis surface / leaf surface of the focal plant (N/L)")+
+  labs(fill="Var(Mix) / Var(Pure)")+
+  theme(plot.title =element_text(color = "black", size = 15, face = "italic",hjust =0.5),#mise en forme
+        legend.title = element_text(face = "bold", size = 10),
+        axis.text.x = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = ),
+        axis.title.x = element_text(color = "black", size = 12, face = "bold"),
+        strip.text.x = element_text(color = "black",size=12, face = "bold"),
+        axis.text.y = element_text(color = "black", size = 12, face = "bold",angle = 0, hjust = ),
+        axis.title.y = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = )
+  )
+
+# Display the heatmap
+heatmap_y_mix_pure_var
+
+# Save the heatmap as an SVG file
+ggsave(file = "Matrice_NonParam_var_BW_Necrosis.svg", plot = heatmap_y_mix_pure_var, width = 9, height = 9)
+
+
+```
+
+## Variance explained by genetic effects
+
+```{r DGE-IGE - BW - N, include=FALSE}
+
+# Fit the aligned rank transform model to the data
+model = art(N ~ Focal * Neighbor, data = data_BW_2)
+
+# Perform ANOVA on the fitted model
+Result = anova(model)
+
+# Calculate partial eta squared for each term in the ANOVA table
+Result$part.eta.sq = with(Result, `Sum Sq` / (`Sum Sq` + `Sum Sq.res`))
+
+# Display the ANOVA result with partial eta squared
+Result
+
+# Perform ANOVA on the fitted model again for redundancy (to show another way to calculate partial eta squared)
+Result2 = anova(model)
+
+# Calculate partial eta squared using an alternative method
+Result2$part.eta.sq = with(Result2, `F value` * `Df` / (`F value` * `Df` + `Df.res`))
+
+# Display the second ANOVA result with partial eta squared
+Result2
+
+```
+
+## Boxplots mix-pur with variances & means
+
+```{r mean - variances - BW - N}
+
+# Conduct Wilcoxon test & fligner test for N by condition
+wilcox.test(N~Condition, data=data_BW)
+fligner.test(N~Condition, data=data_BW)
+
+# Calculate variances for mix and pure conditions
+Mix <- subset(data_BW, data_BW$Condition == "Mix")
+Mix <- Mix$N
+var(Mix)
+Pure <- subset(data_BW, data_BW$Condition == "Pure")
+Pure <- Pure$N
+var(Pure)
+
+# Plotting
+violin <- ggplot(data_BW_2, aes(x=factor(Condition, level=c("Pure","Mix")), y=N)) + geom_violin(trim=FALSE)
+plot <- violin + geom_boxplot(width=0.3, col="#9cb264") + stat_summary(fun=mean, geom="point", shape=23, size=5, color="#7a3776")+
+  geom_text(x=1.5, y=1.45, label="*", col="#7a3776", size = 20)+
+  geom_text(x=1, y=1.45, label="μ(pure) = 0.34", col="#7a3776", size = 10)+
+  geom_text(x=2, y=1.45, label="μ(mix) = 0.30", col="#7a3776", size = 10)+
+  geom_text(x=1.5, y=1.35, label="**", col="#9cb264", size = 20)+
+  geom_text(x=1, y=1.35, label="var(pure) = 0.15", col="#9cb264", size = 10)+
+  geom_text(x=2, y=1.35, label="var(mix) = 0.14", col="#9cb264", size = 10)+
+  ylab("Necrosis surface / leaf surface (N/L)") +
+  ggtitle("Bread wheat")+
+  theme(plot.title =element_text(color = "black", size = 40, face = "italic",hjust =0.5),
+        axis.text.x = element_text(color = "black", size = 40, face = "bold",angle = 0, hjust = ),
+  axis.title.x = element_text(color = "black", size = 40, face = "bold"), 
+  strip.text.x = element_text(color = "black",size=40, face = "bold"),
+  axis.text.y = element_text(color = "black", size = 40, face = "bold",angle = 0, hjust = ),
+  axis.title.y = element_text(color = "black", size = 40, face = "bold",angle = 90, hjust = ))
+plot <- plot + ylim(-0.25, 1.5)
+print(plot)
+
+# Save the plot as an SVG file
+ggsave(file="MixPur_brut_mean_var_BW_Necrosis.svg", plot=plot, width=15, height=15)
+
+```
+
+## Variances vs. mean analysis 
+
+```{r var ~ mean - BW - N, include=FALSE}
+
+# Initialize variables and data frame
+pair = unique(data_BW$Pair)
+sf.N.L_pair <- data.frame()
+n = 1
+
+# Loop through each modality to calculate variance and mean of necrosis surface
+for(i in pair){
+  symptom=subset(data_BW,Pair==i)
+  v<-var(symptom$N)
+  m<-mean(symptom$N)
+  print(v)
+  print(m)
+  new<-c(i, v, m)
+  print(new)
+  sf.N.L_pair[nrow(sf.N.L_pair)+1,1:3]<-c(i, v, m)
+  n=n+1
+}
+
+# Rename columns
+colnames(sf.N.L_pair)<-c('Pair', 'Var', 'Mean')
+sf.N.L_pair[,2]<-as.numeric(sf.N.L_pair[,2])
+sf.N.L_pair[,3]<-as.numeric(sf.N.L_pair[,3])
+sf.N.L_pair<-sf.N.L_pair[order(sf.N.L_pair[,3]),]
+
+# Merge the calculated variance and mean back to the original data
+data_BW_3<-merge(data_BW,sf.N.L_pair)
+data_BW_3<-data_BW_3[order(data_BW_3[,9]),]
+
+# Create a boxplot of necrosis surface by pair, ordered by mean
+plot_var <- ggplot(data_BW_3, aes(x=reorder(Pair,Mean), y=N)) + 
+  geom_boxplot(fill="red",outlier.colour="black", outlier.shape=16,
+             outlier.size=2, notch=FALSE)
+
+# Display the boxplot
+plot_var
+
+# Create a scatter plot of mean vs. variance of necrosis surface
+plot <- ggplot(sf.N.L_pair, aes(x=Mean, y=Var)) + 
+  geom_point()+
+  geom_smooth(color="darkred", fill="red")+
+  theme(axis.text.x = element_text(color = "black", size = 20, face = "bold",angle = 0, hjust = ),
+  axis.title.x = element_text(color = "black", size = 20, face = "bold"), 
+  strip.text.x = element_text(color = "black",size=20, face = "bold"),
+  axis.text.y = element_text(color = "black", size = 20, face = "bold",angle = 0, hjust = ),
+  axis.title.y = element_text(color = "black", size = 20, face = "bold",angle = 90, hjust = ))
+
+# Display the scatter plot
+plot
+
+# Save the scatter plot to a file
+ggsave(file="Corr_mean_var_BW_Necrosis.svg", plot=plot, width=7, height=7)
+
+```
+
+
+# Pycnidia analysis
+
+
+## Mean pairwise comparisons
+
+```{r mean pairwise - BW - P}
+
+# Fit an aligned rank transform (ART) model
+model = art(PN ~ (1|Tray) + Pair, data = data_BW)
+
+# Perform ANOVA on the ART model
+anova(model)
+
+# Conduct pairwise comparisons using the ART model
+sign <- art.con(model, "Pair", adjust = "none")
+
+# Increase the maximum number of printed lines to display all results
+options(max.print=5000)
+
+# Convert the pairwise comparisons to a data frame
+sign_table <- data.frame(sign)
+
+# Apply Bonferroni correction: filter results with p-value < 0.00909 (0.1/11)
+sign_table2<-sign_table[sign_table$p.value<0.009090909,] 
+
+# Annotated pairwise comparisons with significant results after Bonferroni correction:
+# Cen_Cen - Cen_Tit: 4.654860e-03
+# Des_Des - Des_Tit: 6.507255e-03
+
+# 3 mixtures = 1.6% of mixtures showing significant differences
+
+```
+
+## Create mean heatmap for pairwise comparisons
+
+```{r mean pairwise heatmap - BW - P, include=FALSE}
+
+# Generate estimated marginal means (least squares means)
+emm <- emmeans(artlm(model, "Pair"), ~ Pair, pbktest.limit = 200000)
+
+# Convert the estimated marginal means to a data frame
+leastsquare <- as.data.frame(emm)
+
+# Merge the estimated marginal means with the original dataset
+data_BW_2 <- merge(leastsquare, data_BW, by = "Pair")
+
+# Initialize a data frame to store the results
+Pair <- unique(data_BW_2$Pair)
+Paires <- data.frame()
+compt <- 1
+
+# Calculate the mean 'emmean' for each pair
+for(i in Pair) {
+  sub <- subset(data_BW_2, Pair == i)
+  x <- mean(sub$emmean)
+  Paires[compt, 1] <- i
+  Paires[compt, 2] <- x
+  f <- unique(sub$Focal)
+  n <- unique(sub$Neighbor)
+  Paires[compt, 3] <- f
+  Paires[compt, 4] <- n
+  compt <- compt + 1
+}
+
+# Rename the columns of the data frame
+colnames(Paires) <- c('Pair', 'emmean', 'Focal', 'Neighbor')
+
+# Initialize data frames for storing normalized values and pairs
+Focal=unique(Paires$Focal)
+liste<-data.frame(nrow=1:12)
+liste$nrow<-as.character(liste$nrow)
+liste_pair<-data.frame(nrow=1:12)
+liste_pair$nrow<-as.character(liste_pair$nrow)
+
+# Normalize the emmeans by the mean of each focal pair
+for(i in Focal){
+  pair_sub<-subset(Paires,Focal==i)
+  
+  pair_sub_ii<-subset(pair_sub,Neighbor==i)
+  x<-pair_sub_ii$emmean
+  print(x)
+  
+  y<-pair_sub$emmean
+  print(y)
+  norm<-pair_sub$emmean/x
+  norm<-as.data.frame(norm)
+  norm[,2]<-row.names(norm)
+  colnames(norm)<-c('norm', 'nrow')
+  print(norm)
+  liste <- liste %>% full_join(norm, by="nrow")
+  
+  pair<-pair_sub$Pair
+  pair<-as.data.frame(pair)
+  pair[,2]<-row.names(pair)
+  colnames(pair)<-c('Pair', 'nrow')
+  liste_pair <- liste_pair %>% full_join(pair, by="nrow")
+  
+}
+
+# Process the normalized values and pairs
+liste<-liste[,2:13]
+colnames(liste)<-1:12
+list<-as.list(liste)
+list_num<-data.frame(unlist(list))
+list_ssNA<-subset(list_num, unlist.list.!="NA")
+
+liste_pair<-liste_pair[,2:13]
+colnames(liste_pair)<-1:12
+list_pair<-as.list(liste_pair)
+list_pair<-data.frame(unlist(list_pair))
+list_pair_ssNA<-subset(list_pair, unlist.list_pair.!="NA")
+
+# Merge the processed values with the original pairs
+y_pur<-merge(list_ssNA, list_pair_ssNA, by=0)
+colnames(y_pur)<-c('nrow','y_pur','Pair')
+Pair<-merge(y_pur, Paires, by = "Pair")
+
+# Reorder the levels of the 'Focal' factor
+Pair$Focal <- factor(Pair$Focal,levels=rev(unique(Paires$Focal)))
+
+# Create a mean heatmap using ggplot2
+heatmap_y_mix_pure_mean_pure<-ggplot(Pair,aes(x=Neighbor,y=Focal)) + 
+  geom_tile(aes(fill = y_pur), colour = "black", size = 1)+
+  scale_fill_gradient2(low = "darkblue", high = "red", mid = "white", midpoint = 1)+
+  theme_minimal()+
+  geom_text(x=12, y=8.3, label=".", col="black", size = 10) +
+  geom_text(x=12, y=9.3, label=".", col="black", size = 10) +
+  # ylab("Focal") +
+  xlab("Neighbor")+
+  ggtitle("Pycnidia surface / necrosis surface of the focal plant (P/N)")+
+  labs(fill="Mean(Mix) / Mean(Pure)")+
+  theme(plot.title =element_text(color = "black", size = 15, face = "italic",hjust =0.5),#mise en forme
+        legend.title = element_text(face = "bold", size = 10),
+        axis.text.x = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = ),
+        axis.title.x = element_text(color = "black", size = 12, face = "bold"),
+        strip.text.x = element_text(color = "black",size=12, face = "bold"),
+        axis.text.y = element_text(color = "black", size = 12, face = "bold",angle = 0, hjust = ),
+        axis.title.y = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = )
+  )
+
+# Display the heatmap
+heatmap_y_mix_pure_mean_pure
+
+# Save the heatmap as SVG file
+ggsave(file="Matrice_NonParam_BW_Pycnidia.svg", plot=heatmap_y_mix_pure_mean_pure, width=9, height=9)
+
+```
+
+## Variance paiwise comparisons 
+
+```{r variance paiwise comparisons - BW - P}
+
+# Initialize variables
+Pair <- unique(data_BW$Pair)
+Paires <- data.frame()
+compt <- 1
+
+# Calculate variances for each pair and store in Paires dataframe
+for (i in Pair) { 
+  sub <- subset(data_BW, Pair == i)
+  x <- var(sub$PN)
+  print(x)
+  Paires[compt, 1] <- i
+  Paires[compt, 2] <- x
+  f <- unique(sub$Focal)
+  n <- unique(sub$Neighbor)
+  Paires[compt, 3] <- f
+  Paires[compt, 4] <- n
+  compt <- compt + 1
+}
+
+# Rename columns for clarity
+colnames(Paires) <- c('Pair', 'var', 'Focal', 'Neighbor')
+
+# Initialize dataframes for normalized values and pairs
+Focal=unique(Paires$Focal)
+liste<-data.frame(nrow=1:12)
+liste$nrow<-as.character(liste$nrow)
+liste_pair<-data.frame(nrow=1:12)
+liste_pair$nrow<-as.character(liste_pair$nrow)
+
+# Normalize the variances by the mean of each focal pair
+for(i in Focal){
+  pair_sub<-subset(Paires, Focal==i)
+  
+  pair_sub_ii<-subset(pair_sub, Neighbor==i)
+  x<-pair_sub_ii$var
+  print(x)
+  
+  y<-pair_sub$var
+  print(y)
+  norm<-pair_sub$var/x
+  norm<-as.data.frame(norm)
+  norm[,2]<-row.names(norm)
+  colnames(norm)<-c('norm', 'nrow')
+  print(norm)
+  liste <- liste %>% full_join(norm, by="nrow")
+  
+  pair<-pair_sub$Pair
+  pair<-as.data.frame(pair)
+  pair[,2]<-row.names(pair)
+  colnames(pair)<-c('Pair', 'nrow')
+  liste_pair <- liste_pair %>% full_join(pair, by="nrow")
+  
+}
+
+# Process the normalized values and pairs
+liste<-liste[,2:13]
+colnames(liste)<-1:12
+list<-as.list(liste)
+list_num<-data.frame(unlist(list))
+list_ssNA<-subset(list_num, unlist.list.!="NA")
+
+liste_pair<-liste_pair[,2:13]
+colnames(liste_pair)<-1:12
+list_pair<-as.list(liste_pair)
+list_pair<-data.frame(unlist(list_pair))
+list_pair_ssNA<-subset(list_pair, unlist.list_pair.!="NA")
+
+# Merge the processed values with the original pairs
+y_pur<-merge(list_ssNA, list_pair_ssNA, by=0)
+colnames(y_pur)<-c('nrow','y_pur','Pair')
+Pair<-merge(y_pur, Paires, by = "Pair")
+
+# Perform pairwise variance tests
+pvals_var_all <- data.frame()
+
+Focal=unique(Paires$Focal)
+Neighbor=unique(Paires$Neighbor)
+
+for(i in Focal){
+  pair_sub<-subset(data_BW,Focal==i)
+  
+  for(j in Neighbor){
+    # Ajouter la condition pour exécuter la boucle uniquement si j est différent de i
+    if (j != i) {
+      pair_sub_ii <- subset(pair_sub, Neighbor == i | Neighbor == j)
+      
+      levene <- leveneTest(PN ~ Condition, data = pair_sub_ii)
+      fligner <- fligner.test(PN ~ Condition, data = pair_sub_ii)
+
+      pvals_var <- data.frame()
+      pvals_var[1, 1] <- i
+      pvals_var[1, 2] <- j
+      pvals_var[1, 3] <- levene$`Pr(>F)`[1]
+      pvals_var[1, 4] <- fligner$p.value
+
+      colnames(pvals_var) <- c('Focal', 'Neighbor', 'pval_Levene', 'pval_Fligner')
+      pvals_var_all <- rbind(pvals_var_all, pvals_var)
+    }
+  }
+}
+
+# Adjust p-values for multiple comparisons (Bonferroni correction)
+pvals_var_all$pval_Levene <- pvals_var_all$pval_Levene*13
+pvals_var_all$pval_Fligner <- pvals_var_all$pval_Fligner*13
+pvals_var_all <- pvals_var_all[order(pvals_var_all$pval_Fligner), ]
+pvals_var_all
+
+# Annotated pairwise comparisons with significant results after Bonferroni correction:
+#   Focal     Neighbour   pval_Levene   pval_Fligner  
+#   Centurion Titlis      0.002997090   9.310193e-05  ***
+#   Titlis    Descartes   0.001357412   2.335945e-03  **
+#   Geny (AB) Centurion   1.354170718   3.928537e-03  **
+#   Titlis    Centurion   0.004448451   4.371542e-03  **
+#   Titlis    Accroc      0.005152907   4.715933e-03  **
+#   Titlis    Bergamo     0.008069348   9.224496e-03  **
+#   Descartes Bergamo     2.160216433   9.908181e-03  **
+#   Geny (AB) Accroc      1.420734685   1.164669e-02  *
+#   Centurion Fructidor   0.075305654   1.379039e-02  *
+#   Titlis    Apache      0.015179382   1.515646e-02  *
+#   Centurion Bergamo     0.064121709   1.654414e-02  *
+#   Centurion Geny (AB)   0.115770996   1.735435e-02  *
+#   Fructidor Titlis      0.308019944   1.869588e-02  *
+#   Titlis    Geny (AB)   0.032527446   2.004132e-02  *
+#   Bergamo   Descartes   2.276633520   2.143306e-02  *
+#   Titlis    SYMattis    0.015504801   2.639702e-02  *
+#   Bergamo   Rubisko     1.192856426   3.366814e-02  *
+#   Geny (AB) Fructidor   11.217225384  3.899231e-02  *
+#   Titlis    Fructidor   0.033336411   4.484693e-02  *
+#   Descartes Recital     2.693449233   4.645531e-02  *
+#   Accroc    Recital     0.012424249   5.403685e-02  .
+#   Centurion Apache      1.347921235   7.056202e-02  .
+#   Fructidor Centurion   2.652741732   7.554338e-02  .
+#   Descartes Rubisko     2.716428216   8.728595e-02  .
+
+# 24 mixtures (17.42% of mixtures) have a variance different from pure
+
+```
+
+## Variance heatmap of pairwise comparisons
+
+```{r variance pairwise heatmap - BW - P, include=FALSE}
+
+# Replace values > 4 with NA
+Pair$y_pur <- ifelse(Pair$y_pur > 4, NA, Pair$y_pur)
+
+# Reorder the levels of the 'Focal' factor
+Pair$Focal <- factor(Pair$Focal, levels = rev(sort(unique(Pair$Focal))))
+
+# Create a heatmap using ggplot2
+heatmap_y_mix_pure_var <- ggplot(Pair,aes(x=Neighbor,y= Focal)) + 
+  geom_tile(aes(fill = y_pur), colour = "black", size = 1)+
+  scale_fill_gradient2(low = "darkblue", mid = "white", high = "red", midpoint = 1, na.value = "#A52A2A") +
+  theme_minimal()+
+  
+  geom_text(x=9, y=12.3, label=".", col="black", size = 10)+
+  geom_text(x=2, y=9.3, label=".", col="black", size = 10)+
+  geom_text(x=4, y=7.3, label=".", col="black", size = 10)+
+  geom_text(x=10, y=8.3, label=".", col="black", size = 10)+
+  
+  geom_text(x=2, y=0.8, label="*", col="black", size = 10)+
+  geom_text(x=7, y=0.8, label="*", col="black", size = 10)+
+  geom_text(x=6, y=0.8, label="*", col="black", size = 10)+
+  geom_text(x=11, y=0.8, label="*", col="black", size = 10)+
+  geom_text(x=1, y=5.8, label="*", col="black", size = 10)+
+  geom_text(x=6, y=5.8, label="*", col="black", size = 10)+
+  geom_text(x=12, y=6.8, label="*", col="black", size = 10)+
+  geom_text(x=9, y=7.8, label="*", col="black", size = 10)+
+  geom_text(x=3, y=8.8, label="*", col="black", size = 10)+
+  geom_text(x=7, y=8.8, label="*", col="black", size = 10)+
+  geom_text(x=6, y=8.8, label="*", col="black", size = 10)+
+  geom_text(x=5, y=9.8, label="*", col="black", size = 10)+
+  geom_text(x=10, y=9.8, label="*", col="black", size = 10)+
+  
+  geom_text(x=3, y=7.8, label="**", col="black", size = 10)+
+  geom_text(x=3, y=0.8, label="**", col="black", size = 10)+
+  geom_text(x=1, y=0.8, label="**", col="black", size = 10)+
+  geom_text(x=4, y=0.8, label="**", col="black", size = 10)+
+  geom_text(x=5, y=0.8, label="**", col="black", size = 10)+
+  geom_text(x=4, y=5.8, label="**", col="black", size = 10)+
+  
+  geom_text(x=12, y=8.8, label="***", col="black", size = 10)+
+  
+  ylab("Focal") +
+  xlab("Neighbor")+
+  ggtitle("Pycnidia surface / necrosis surface of the focal plant (P/N)")+
+  labs(fill="Var(Mix) / Var(Pure)")+
+  theme(plot.title =element_text(color = "black", size = 15, face = "italic",hjust =0.5),#mise en forme
+        legend.title = element_text(face = "bold", size = 10),
+        axis.text.x = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = ),
+        axis.title.x = element_text(color = "black", size = 12, face = "bold"),
+        strip.text.x = element_text(color = "black",size=12, face = "bold"),
+        axis.text.y = element_text(color = "black", size = 12, face = "bold",angle = 0, hjust = ),
+        axis.title.y = element_text(color = "black", size = 12, face = "bold",angle = 90, hjust = )
+  )
+
+# Display the heatmap
+heatmap_y_mix_pure_var
+
+# Save the heatmap as an SVG file
+ggsave(file="Matrice_NonParam_var_BW_Pycnides.svg", plot=heatmap_y_mix_pure_var, width=9, height=9)
+
+```
+
+## Variance explained by genetic effects
+
+```{r DGE-IGE - BW - P, include=FALSE}
+
+# Fit the aligned rank transform model to the data
+model = art(PN ~ Focal * Neighbor, data = data_BW_2)
+
+# Perform ANOVA on the fitted model
+Result = anova(model)
+
+# Calculate partial eta squared for each term in the ANOVA table
+Result$part.eta.sq = with(Result, `Sum Sq` / (`Sum Sq` + `Sum Sq.res`))
+
+# Display the ANOVA result with partial eta squared
+Result
+
+# Perform ANOVA on the fitted model again for redundancy (to show another way to calculate partial eta squared)
+Result2 = anova(model)
+
+# Calculate partial eta squared using an alternative method
+Result2$part.eta.sq = with(Result2, `F value` * `Df` / (`F value` * `Df` + `Df.res`))
+
+# Display the second ANOVA result with partial eta squared
+Result2
+
+```
+
+## Boxplots mix-pur with variances & means
+
+```{r mean - variances - BW - P}
+
+# Conduct Wilcoxon test & fligner test for N by condition
+wilcox.test(PN~Condition, data=data_BW)
+fligner.test(PN~Condition, data=data_BW)
+
+# Calculate variances for mix and pure conditions
+Mix <- subset(data_BW, data_BW$Condition == "Mix")
+Mix <- Mix$PN
+var(Mix)
+Pure <- subset(data_BW, data_BW$Condition == "Pure")
+Pure <- Pure$PN
+var(Pure)
+
+# Plotting
+violin <- ggplot(data_BW_2, aes(x=factor(Condition, level=c("Pure","Mix")), y=PN)) + geom_violin(trim=FALSE)
+plot <- violin + geom_boxplot(width=0.3, col="#9cb264") + stat_summary(fun=mean, geom="point", shape=23, size=5, color="#7a3776")+
+  geom_text(x=1.5, y=0.058, label="ns", col="#7a3776", size = 10)+
+  geom_text(x=1, y=0.058, label="μ(pure) = 0.027", col="#7a3776", size = 10)+
+  geom_text(x=2, y=0.058, label="μ(mix) = 0.030", col="#7a3776", size = 10)+
+  geom_text(x=1.5, y=0.053, label="*", col="#9cb264", size = 20)+
+  geom_text(x=1, y=0.053, label="var(pure) = 0.002", col="#9cb264", size = 10)+
+  geom_text(x=2, y=0.053, label="var(mix) = 0.005", col="#9cb264", size = 10)+
+  ylab("Pycnidia surface / necrosis surface (P/N)")+
+  ggtitle("Bread wheat")+
+  theme(plot.title =element_text(color = "black", size = 40, face = "italic",hjust =0.5),
+        axis.text.x = element_text(color = "black", size = 40, face = "bold",angle = 0, hjust = ),
+  axis.title.x = element_text(color = "black", size = 40, face = "bold"), 
+  strip.text.x = element_text(color = "black",size=40, face = "bold"),
+  axis.text.y = element_text(color = "black", size = 40, face = "bold",angle = 0, hjust = ),
+  axis.title.y = element_text(color = "black", size = 40, face = "bold",angle = 90, hjust = ))
+plot <- plot + ylim(-0.02, 0.06)
+print(plot)
+
+# Save the plot as an SVG file
+ggsave(file="MixPur_brut_mean_var_BW_Pycnidia.svg", plot=plot, width=15, height=15)
+
+```
+
+## Variances vs. mean analysis 
+
+```{r var ~ mean - BW - P, include=FALSE}
+
+# Initialize variables and data frame
+pair = unique(data_BW$Pair)
+sf.N.L_pair <- data.frame()
+n = 1
+
+# Loop through each modality to calculate variance and mean of necrosis surface
+for (i in pair) {
+  symptom = subset(data_BW, Pair == i)  # Subset data for the current pair
+  v = var(symptom$PN)  # Calculate variance of necrosis surface
+  m = mean(symptom$PN)  # Calculate mean of necrosis surface
+  print(v)
+  print(m)
+  new = c(i, v, m)
+  print(new)
+  # Add the results to the data frame
+  sf.N.L_pair[nrow(sf.N.L_pair) + 1, 1:3] <- c(i, v, m)
+  n = n + 1
+}
+
+# Rename columns
+colnames(sf.N.L_pair) <- c('Pair', 'Var', 'Mean')
+sf.N.L_pair[,2] <- as.numeric(sf.N.L_pair[,2])
+sf.N.L_pair[,3] <- as.numeric(sf.N.L_pair[,3])
+# Order the data frame by mean
+sf.N.L_pair <- sf.N.L_pair[order(sf.N.L_pair[,3]),]
+
+# Merge the calculated variance and mean back to the original data
+data_BW_3 <- merge(data_BW, sf.N.L_pair)
+# Order the merged data by the calculated mean
+data_BW_3 <- data_BW_3[order(data_BW_3[,9]),]
+
+# Create a boxplot of pycnidia by pair, ordered by mean
+plot_var <- ggplot(data_BW_3, aes(x=reorder(Pair,Mean), y=PN)) + 
+  geom_boxplot(fill="red",outlier.colour="black", outlier.shape=16,
+             outlier.size=2, notch=FALSE)
+
+# Display the boxplot
+plot_var
+
+# Create a scatter plot of mean vs. variance of necrosis surface
+plot <- ggplot(sf.N.L_pair, aes(x=Mean, y=Var)) + 
+  geom_point()+
+  geom_smooth(color="darkred", fill="red")+
+  theme(axis.text.x = element_text(color = "black", size = 20, face = "bold",angle = 0, hjust = ),
+  axis.title.x = element_text(color = "black", size = 20, face = "bold"), 
+  strip.text.x = element_text(color = "black",size=20, face = "bold"),
+  axis.text.y = element_text(color = "black", size = 20, face = "bold",angle = 0, hjust = ),
+  axis.title.y = element_text(color = "black", size = 20, face = "bold",angle = 90, hjust = ))
+
+# Display the scatter plot
+plot
+
+# Save the scatter plot to a file
+ggsave(file="Corr_mean_var_BW_Pycnidia.svg", plot=plot, width=7, height=7)
+
+```
+
+
+
