@@ -12,6 +12,5 @@ Data used for the study: "Plant-plant interactions in varietal mixtures directly
 - **Neighbor**: Neighbor genotype
 - **Pair**: Combination of Focal_Neighbor genotypes
 - **Condition**: Mixtures or monocultures
-- **Tray**: Tray number in the greenhouse
 - **N**: Surface area of necrosis
 - **PN**: Necrosis area containing pycnidia
